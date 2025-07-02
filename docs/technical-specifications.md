@@ -4,40 +4,34 @@
 
 ### 1.1 システム構成
 ```
-┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
-│   Frontend      │────▶│   Backend API   │────▶│  OpenAI API     │
-│   (React)       │     │   (Node.js)     │     │  (GPT-4o)       │
-└─────────────────┘     └─────────────────┘     └─────────────────┘
-        │                        │
-        ▼                        ▼
 ┌─────────────────┐     ┌─────────────────┐
-│   Static Files  │     │   Database      │
-│   (CDN)         │     │   (PostgreSQL)  │
+│   Next.js App   │────▶│  OpenAI API     │
+│  (Full Stack)   │     │  (GPT-4o)       │
 └─────────────────┘     └─────────────────┘
+        │
+        ▼
+┌─────────────────┐
+│   Database      │
+│   (SQLite)      │
+└─────────────────┘
 ```
 
 ### 1.2 技術スタック
 
-#### フロントエンド
-- **フレームワーク**: React 18.x
-- **状態管理**: Redux Toolkit / Zustand
-- **スタイリング**: Tailwind CSS / Styled Components
-- **ビルドツール**: Vite
+#### フレームワーク
+- **フレームワーク**: Next.js 14.x (App Router)
 - **言語**: TypeScript
+- **スタイリング**: Tailwind CSS
 - **画像処理**: Canvas API / fabric.js
-
-#### バックエンド
-- **実行環境**: Node.js 20.x
-- **フレームワーク**: Express.js / Fastify
-- **言語**: TypeScript
-- **認証**: JWT
+- **データベース**: SQLite (Prisma ORM)
+- **認証**: NextAuth.js
 - **APIドキュメント**: OpenAPI/Swagger
 
 #### インフラ
-- **ホスティング**: Vercel (Frontend) / Railway or Render (Backend)
-- **データベース**: PostgreSQL (Supabase)
-- **ファイルストレージ**: Cloudinary / AWS S3
-- **CDN**: Cloudflare
+- **ホスティング**: Vercel
+- **データベース**: SQLite (ローカルファイル)
+- **ファイルストレージ**: Vercel Blob / AWS S3
+- **CDN**: Vercel Edge Network
 
 ## 2. API設計
 
@@ -46,6 +40,8 @@
 #### 画像生成API
 ```typescript
 POST /api/generate
+
+// Next.js API Route: app/api/generate/route.ts
 {
   "prompt": string,           // キャラクター説明
   "sourceImage"?: string,     // 元画像のBase64またはURL（オプション）
@@ -83,7 +79,9 @@ Response (非同期処理):
 
 #### 画像生成状態確認API
 ```typescript
-GET /api/generate/status/{taskId}
+GET /api/generate/status/[taskId]
+
+// Next.js API Route: app/api/generate/status/[taskId]/route.ts
 
 Response:
 {
@@ -98,6 +96,8 @@ Response:
 #### 画像アップロードAPI
 ```typescript
 POST /api/upload
+
+// Next.js API Route: app/api/upload/route.ts
 Content-Type: multipart/form-data
 
 {
@@ -114,6 +114,8 @@ Response:
 #### 履歴取得API
 ```typescript
 GET /api/history?userId={userId}&limit={limit}&offset={offset}
+
+// Next.js API Route: app/api/history/route.ts
 
 Response:
 {
@@ -241,33 +243,48 @@ class OpenAIServiceImpl implements OpenAIService {
 
 ## 3. フロントエンド設計
 
-### 3.1 コンポーネント構成
+### 3.1 Next.js App Router構成
 ```
-src/
+app/
+├── layout.tsx                 # ルートレイアウト
+├── page.tsx                   # ホームページ
+├── generate/
+│   └── page.tsx              # 画像生成ページ
+├── history/
+│   └── page.tsx              # 履歴ページ
+├── api/
+│   ├── generate/
+│   │   └── route.ts          # 画像生成API
+│   ├── upload/
+│   │   └── route.ts          # アップロードAPI
+│   └── history/
+│       └── route.ts          # 履歴API
 ├── components/
-│   ├── Generator/
-│   │   ├── PromptInput.tsx
-│   │   ├── StyleSelector.tsx
-│   │   ├── EffectsPanel.tsx
-│   │   └── GenerateButton.tsx
-│   ├── Preview/
-│   │   ├── ImagePreview.tsx
-│   │   ├── LoadingState.tsx
-│   │   └── ErrorState.tsx
-│   ├── Gallery/
-│   │   ├── HistoryGrid.tsx
-│   │   └── ImageCard.tsx
-│   └── Common/
-│       ├── Header.tsx
-│       ├── Footer.tsx
-│       └── Modal.tsx
+│   ├── generator/
+│   │   ├── prompt-input.tsx
+│   │   ├── style-selector.tsx
+│   │   ├── effects-panel.tsx
+│   │   └── generate-button.tsx
+│   ├── preview/
+│   │   ├── image-preview.tsx
+│   │   ├── loading-state.tsx
+│   │   └── error-state.tsx
+│   ├── gallery/
+│   │   ├── history-grid.tsx
+│   │   └── image-card.tsx
+│   └── ui/                    # 共通UIコンポーネント
+│       ├── header.tsx
+│       ├── footer.tsx
+│       └── modal.tsx
 ├── hooks/
-│   ├── useImageGeneration.ts
-│   ├── useHistory.ts
-│   └── useLocalStorage.ts
-├── services/
+│   ├── use-image-generation.ts
+│   ├── use-history.ts
+│   └── use-local-storage.ts
+├── lib/
 │   ├── api.ts
-│   └── imageProcessing.ts
+│   ├── image-processing.ts
+│   ├── db.ts                 # Prismaクライアント
+│   └── openai.ts
 └── utils/
     ├── constants.ts
     └── helpers.ts
@@ -380,83 +397,125 @@ const validateGenerationRequest = (req: GenerationRequest): ValidationResult => 
 
 ### 6.2 キャッシング戦略
 ```typescript
-// Redisを使用したキャッシング
-class CacheService {
-  async getCachedImage(prompt: string): Promise<string | null> {
-    const key = this.generateCacheKey(prompt);
-    return await redis.get(key);
-  }
-  
-  async cacheImage(prompt: string, imageUrl: string): Promise<void> {
-    const key = this.generateCacheKey(prompt);
-    await redis.setex(key, 3600, imageUrl); // 1時間キャッシュ
-  }
-}
+// Next.jsのキャッシュ機能を使用
+import { unstable_cache } from 'next/cache';
+
+const getCachedImage = unstable_cache(
+  async (prompt: string) => {
+    // SQLiteから既存の画像を検索
+    const cachedImage = await prisma.generatedImage.findFirst({
+      where: { prompt },
+      orderBy: { createdAt: 'desc' }
+    });
+    return cachedImage?.imageUrl || null;
+  },
+  ['image-cache'],
+  { revalidate: 3600 } // 1時間キャッシュ
+);
 ```
 
 ## 7. 非同期処理とタスク管理
 
 ### 7.1 タスクキューシステム
 ```typescript
-// Bull Queueを使用した非同期処理
-import Queue from 'bull';
+// Next.js Server Actionsを使用した非同期処理
+import { createTask, updateTaskProgress } from '@/lib/tasks';
 
-const imageGenerationQueue = new Queue('image-generation', {
-  redis: {
-    port: 6379,
-    host: 'localhost'
-  }
-});
-
-// ワーカー定義
-imageGenerationQueue.process(async (job) => {
-  const { taskId, prompt, sourceImage, rarity } = job.data;
+export async function generateImageAction(data: GenerationRequest) {
+  'use server';
   
-  try {
-    // 進捗更新
-    await job.progress(10);
-    
-    // 画像生成
-    const imageUrl = await openAIService.generateImage(prompt, sourceImage);
-    await job.progress(80);
-    
-    // 後処理（レアリティエフェクト追加など）
-    const processedUrl = await postProcessImage(imageUrl, rarity);
-    await job.progress(100);
-    
-    return { taskId, imageUrl: processedUrl };
-  } catch (error) {
-    throw new Error(`Generation failed: ${error.message}`);
-  }
-});
+  // タスクをSQLiteに保存
+  const task = await prisma.task.create({
+    data: {
+      status: 'pending',
+      data: JSON.stringify(data)
+    }
+  });
+  
+  // バックグラウンドで処理を実行
+  processImageGeneration(task.id, data)
+    .catch(error => {
+      prisma.task.update({
+        where: { id: task.id },
+        data: { status: 'failed', error: error.message }
+      });
+    });
+  
+  return { taskId: task.id };
+}
+
+async function processImageGeneration(taskId: string, data: GenerationRequest) {
+  // 進捗更新
+  await updateTaskProgress(taskId, 10);
+  
+  // 画像生成
+  const imageUrl = await openAIService.generateImage(data.prompt, data.sourceImage);
+  await updateTaskProgress(taskId, 80);
+  
+  // 後処理
+  const processedUrl = await postProcessImage(imageUrl, data.rarity);
+  await updateTaskProgress(taskId, 100);
+  
+  // タスクを完了としてマーク
+  await prisma.task.update({
+    where: { id: taskId },
+    data: {
+      status: 'completed',
+      result: JSON.stringify({ imageUrl: processedUrl })
+    }
+  });
+}
 ```
 
 ### 7.2 WebSocket通知
 ```typescript
-// Socket.ioを使用したリアルタイム通知
-io.on('connection', (socket) => {
-  socket.on('subscribe-task', (taskId) => {
-    socket.join(`task:${taskId}`);
+// Server-Sent Events (SSE)を使用したリアルタイム通知
+// app/api/tasks/[taskId]/stream/route.ts
+export async function GET(
+  request: Request,
+  { params }: { params: { taskId: string } }
+) {
+  const stream = new ReadableStream({
+    async start(controller) {
+      const encoder = new TextEncoder();
+      
+      // タスクの状態を定期的にチェック
+      const interval = setInterval(async () => {
+        const task = await prisma.task.findUnique({
+          where: { id: params.taskId }
+        });
+        
+        if (!task) {
+          clearInterval(interval);
+          controller.close();
+          return;
+        }
+        
+        const data = `data: ${JSON.stringify({
+          taskId: task.id,
+          status: task.status,
+          progress: task.progress,
+          result: task.result ? JSON.parse(task.result) : null
+        })}\n\n`;
+        
+        controller.enqueue(encoder.encode(data));
+        
+        if (task.status === 'completed' || task.status === 'failed') {
+          clearInterval(interval);
+          controller.close();
+        }
+      }, 1000);
+    }
   });
-});
-
-// タスク完了時の通知
-imageGenerationQueue.on('completed', (job, result) => {
-  io.to(`task:${result.taskId}`).emit('generation-complete', {
-    taskId: result.taskId,
-    imageUrl: result.imageUrl,
-    status: 'completed'
+  
+  return new Response(stream, {
+    headers: {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      'Connection': 'keep-alive'
+    }
   });
-});
-
-// 進捗通知
-imageGenerationQueue.on('progress', (job, progress) => {
-  io.to(`task:${job.data.taskId}`).emit('generation-progress', {
-    taskId: job.data.taskId,
-    progress: progress,
-    status: 'processing'
-  });
-});
+}
 ```
 
 ## 8. エラーハンドリング
@@ -649,9 +708,9 @@ jobs:
 ```env
 # .env.production
 OPENAI_API_KEY=sk-xxx
-DATABASE_URL=postgresql://xxx
-REDIS_URL=redis://xxx
-CLOUDINARY_URL=cloudinary://xxx
+DATABASE_URL=file:./prod.db
+NEXT_PUBLIC_VERCEL_URL=https://your-app.vercel.app
+VERCEL_BLOB_READ_WRITE_TOKEN=xxx
 ```
 
 ## 12. モニタリング
