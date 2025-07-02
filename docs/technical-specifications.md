@@ -6,14 +6,15 @@
 ```
 ┌─────────────────┐     ┌─────────────────┐
 │   Next.js App   │────▶│  OpenAI API     │
-│  (Full Stack)   │     │  (GPT-4o)       │
+│  (Full Stack)   │     │  (DALL-E 3)     │
 └─────────────────┘     └─────────────────┘
         │
-        ▼
-┌─────────────────┐
-│   Database      │
-│   (SQLite)      │
-└─────────────────┘
+        ├──────┐
+        ▼       ▼
+┌─────────────────┐  ┌─────────────────┐
+│   Database      │  │  Local Storage  │
+│   (SQLite)      │  │  (public/images)│
+└─────────────────┘  └─────────────────┘
 ```
 
 ### 1.2 技術スタック
@@ -22,16 +23,14 @@
 - **フレームワーク**: Next.js 14.x (App Router)
 - **言語**: TypeScript
 - **スタイリング**: Tailwind CSS
-- **画像処理**: Canvas API / fabric.js
 - **データベース**: SQLite (Prisma ORM)
-- **認証**: NextAuth.js
-- **APIドキュメント**: OpenAPI/Swagger
+- **ファイルストレージ**: ローカルファイルシステム
 
-#### インフラ
-- **ホスティング**: Vercel
+#### ローカル環境
+- **実行環境**: Node.js 20.x
 - **データベース**: SQLite (ローカルファイル)
-- **ファイルストレージ**: Vercel Blob / AWS S3
-- **CDN**: Vercel Edge Network
+- **画像保存**: public/imagesディレクトリ
+- **ポート**: 3000 (デフォルト)
 
 ## 2. API設計
 
@@ -113,7 +112,7 @@ Response:
 
 #### 履歴取得API
 ```typescript
-GET /api/history?userId={userId}&limit={limit}&offset={offset}
+GET /api/history?limit={limit}&offset={offset}
 
 // Next.js API Route: app/api/history/route.ts
 
@@ -313,39 +312,34 @@ interface AppState {
 
 ## 4. 画像後処理
 
-### 4.1 Canvas処理でのエフェクト追加
+### 4.1 画像保存処理
 ```typescript
-class ImagePostProcessor {
-  private canvas: HTMLCanvasElement;
-  private ctx: CanvasRenderingContext2D;
+import { writeFile } from 'fs/promises';
+import { join } from 'path';
+import { v4 as uuidv4 } from 'uuid';
+
+class ImageStorageService {
+  private storageDir = join(process.cwd(), 'public', 'images');
   
-  addHolographicEffect(image: HTMLImageElement): void {
-    // グラデーションオーバーレイ
-    const gradient = this.ctx.createLinearGradient(0, 0, this.canvas.width, this.canvas.height);
-    gradient.addColorStop(0, 'rgba(255, 0, 0, 0.3)');
-    gradient.addColorStop(0.33, 'rgba(0, 255, 0, 0.3)');
-    gradient.addColorStop(0.66, 'rgba(0, 0, 255, 0.3)');
-    gradient.addColorStop(1, 'rgba(255, 0, 255, 0.3)');
+  async saveImage(imageUrl: string): Promise<string> {
+    // OpenAI APIから画像をダウンロード
+    const response = await fetch(imageUrl);
+    const buffer = await response.arrayBuffer();
     
-    this.ctx.globalCompositeOperation = 'overlay';
-    this.ctx.fillStyle = gradient;
-    this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+    // ユニークなファイル名を生成
+    const filename = `${uuidv4()}.png`;
+    const filepath = join(this.storageDir, filename);
+    
+    // ファイルを保存
+    await writeFile(filepath, Buffer.from(buffer));
+    
+    // 公開URLを返す
+    return `/images/${filename}`;
   }
   
-  addSparkleEffect(): void {
-    // パーティクルエフェクトの追加
-    const particles = this.generateSparkleParticles();
-    particles.forEach(particle => {
-      this.ctx.beginPath();
-      this.ctx.arc(particle.x, particle.y, particle.size, 0, Math.PI * 2);
-      this.ctx.fillStyle = `rgba(255, 255, 255, ${particle.opacity})`;
-      this.ctx.fill();
-    });
-  }
-  
-  addFrame(frameType: string, color: string): void {
-    // 装飾的な枠の追加
-    // SVGパスを使用した複雑な枠デザイン
+  async deleteImage(filename: string): Promise<void> {
+    const filepath = join(this.storageDir, filename);
+    await unlink(filepath);
   }
 }
 ```
@@ -390,10 +384,10 @@ const validateGenerationRequest = (req: GenerationRequest): ValidationResult => 
 
 ## 6. パフォーマンス最適化
 
-### 6.1 画像最適化
-- WebP形式での配信
-- 複数解像度の提供（srcset）
-- 遅延読み込み実装
+### 6.1 ローカルストレージ最適化
+- 定期的なクリーンアップ処理
+- ファイル名にタイムスタンプを含める
+- 適切なディレクトリ構造
 
 ### 6.2 キャッシング戦略
 ```typescript
@@ -678,48 +672,54 @@ const rarityPromptEnhancements = {
 - Lighthouse CI
 - 画像生成時間の計測
 
-## 11. デプロイメント
+## 11. ローカル開発環境
 
-### 11.1 CI/CD パイプライン
-```yaml
-# .github/workflows/deploy.yml
-name: Deploy
-on:
-  push:
-    branches: [main]
+### 11.1 セットアップ
+```bash
+# 依存関係のインストール
+npm install
 
-jobs:
-  test:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v3
-      - name: Run tests
-        run: npm test
+# データベースの初期化
+npx prisma generate
+npx prisma migrate dev
 
-  deploy:
-    needs: test
-    runs-on: ubuntu-latest
-    steps:
-      - name: Deploy to Vercel
-        run: vercel --prod
+# 画像保存ディレクトリの作成
+mkdir -p public/images
+
+# 開発サーバーの起動
+npm run dev
 ```
 
 ### 11.2 環境変数
 ```env
-# .env.production
+# .env.local
 OPENAI_API_KEY=sk-xxx
-DATABASE_URL=file:./prod.db
-NEXT_PUBLIC_VERCEL_URL=https://your-app.vercel.app
-VERCEL_BLOB_READ_WRITE_TOKEN=xxx
+DATABASE_URL=file:./dev.db
 ```
 
-## 12. モニタリング
+## 12. ローカルデバッグ
 
-### 12.1 ログ収集
-- Sentry によるエラートラッキング
-- Datadog によるパフォーマンス監視
+### 12.1 デバッグツール
+- Next.jsのデバッグ機能
+- console.logによるログ出力
+- Prisma Studioでのデータベース確認
 
-### 12.2 メトリクス
-- API レスポンスタイム
-- 画像生成成功率
-- ユーザーアクティビティ
+```bash
+# Prisma Studioの起動
+npx prisma studio
+```
+
+### 12.2 開発用コマンド
+```json
+// package.json
+{
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint",
+    "db:migrate": "prisma migrate dev",
+    "db:studio": "prisma studio"
+  }
+}
+```

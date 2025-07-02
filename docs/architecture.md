@@ -1,21 +1,22 @@
 # ビックリマンシール風画像生成ツール アーキテクチャ設計書
 
 ## 概要
-Next.js 14 (App Router)、Tailwind CSS、SQLiteを使用したフルスタックWebアプリケーションのアーキテクチャ設計書です。
+Next.js 14 (App Router)、Tailwind CSS、SQLiteを使用したローカル環境向けのシンプルなフルスタックWebアプリケーションのアーキテクチャ設計書です。
 
 ## システム構成図
 
 ```
 ┌─────────────────┐     ┌─────────────────┐
 │   Next.js App   │────▶│  OpenAI API     │
-│  (Full Stack)   │     │  (GPT-4o)       │
+│  (Full Stack)   │     │  (DALL-E 3)     │
 └─────────────────┘     └─────────────────┘
         │
-        ▼
-┌─────────────────┐
-│   Database      │
-│   (SQLite)      │
-└─────────────────┘
+        ├───────┐
+        ▼       ▼
+┌─────────────────┐  ┌─────────────────┐
+│   Database      │  │  Local Storage  │
+│   (SQLite)      │  │  (public/images)│
+└─────────────────┘  └─────────────────┘
 ```
 
 ## 技術スタック
@@ -25,23 +26,10 @@ Next.js 14 (App Router)、Tailwind CSS、SQLiteを使用したフルスタック
 - **TypeScript**: 型安全な開発
 - **Tailwind CSS**: ユーティリティファーストのCSSフレームワーク
 - **Prisma**: 型安全なORMでSQLiteと連携
-- **NextAuth.js**: 認証・認可
-- **React Hook Form**: フォーム管理
-- **Zod**: バリデーション
 
-### データベース
+### データベース・ストレージ
 - **SQLite**: ローカルファイルベースのデータベース
-- **Prisma ORM**: データベース操作の抽象化
-
-### 画像処理・ストレージ
-- **Canvas API**: クライアントサイドでの画像後処理
-- **Vercel Blob**: 画像ファイルストレージ
-- **Sharp**: サーバーサイドでの画像最適化
-
-### インフラ・デプロイ
-- **Vercel**: ホスティング・デプロイ
-- **Vercel Edge Network**: CDN
-- **GitHub Actions**: CI/CD
+- **ローカルファイルシステム**: 生成画像の保存（public/images）
 
 ## ディレクトリ構造
 
@@ -55,18 +43,16 @@ bikkuriman-sticker-creator/
 │   │   └── page.tsx
 │   ├── history/               # 履歴ページ
 │   │   └── page.tsx
-│   ├── api/                   # API Routes
-│   │   ├── auth/[...nextauth]/
-│   │   │   └── route.ts       # NextAuth.js
-│   │   ├── generate/
-│   │   │   └── route.ts       # 画像生成API
-│   │   ├── upload/
-│   │   │   └── route.ts       # アップロードAPI
-│   │   └── history/
-│   │       └── route.ts       # 履歴API
-│   └── (auth)/                # 認証関連ページ
-│       ├── login/
-│       └── register/
+│   └── api/                   # API Routes
+│       ├── generate/
+│       │   └── route.ts       # 画像生成API
+│       ├── upload/
+│       │   └── route.ts       # アップロードAPI
+│       ├── history/
+│       │   └── route.ts       # 履歴API
+│       └── tasks/[taskId]/
+│           └── stream/
+│               └── route.ts   # タスク進捗ストリーミング
 ├── components/                 # UIコンポーネント
 │   ├── generator/             # 画像生成関連
 │   ├── preview/               # プレビュー関連
@@ -74,9 +60,9 @@ bikkuriman-sticker-creator/
 │   └── ui/                    # 共通UI
 ├── lib/                       # ライブラリ・ユーティリティ
 │   ├── api.ts                # APIクライアント
-│   ├── auth.ts               # NextAuth設定
 │   ├── db.ts                 # Prismaクライアント
 │   ├── openai.ts             # OpenAI API
+│   ├── storage.ts            # ローカルストレージ管理
 │   └── actions.ts            # Server Actions
 ├── hooks/                     # カスタムフック
 ├── utils/                     # ユーティリティ関数
@@ -84,13 +70,13 @@ bikkuriman-sticker-creator/
 ├── prisma/                    # Prismaスキーマ
 │   ├── schema.prisma
 │   └── migrations/
-├── public/                    # 静的ファイル
-└── tests/                     # テストファイル
+└── public/                    # 静的ファイル
+    └── images/                # 生成画像保存ディレクトリ
 ```
 
 ## データフロー
 
-### 1. 画像生成フロー
+### 画像生成フロー
 
 ```mermaid
 sequenceDiagram
@@ -99,7 +85,7 @@ sequenceDiagram
     participant API
     participant OpenAI
     participant DB
-    participant Storage
+    participant LocalStorage
 
     User->>Client: 画像生成リクエスト
     Client->>API: POST /api/generate
@@ -107,31 +93,12 @@ sequenceDiagram
     API-->>Client: タスクID返却
     API->>OpenAI: 画像生成API呼び出し
     OpenAI-->>API: 画像URL
-    API->>Storage: 画像保存
-    Storage-->>API: 保存URL
+    API->>LocalStorage: 画像ダウンロード・保存
+    LocalStorage-->>API: ローカルパス
     API->>DB: 結果保存
     Client->>API: GET /api/tasks/[id]/stream
     API-->>Client: Server-Sent Events
     Client->>User: 完成画像表示
-```
-
-### 2. 認証フロー
-
-```mermaid
-sequenceDiagram
-    participant User
-    participant Client
-    participant NextAuth
-    participant Provider
-    participant DB
-
-    User->>Client: ログインクリック
-    Client->>NextAuth: signIn()
-    NextAuth->>Provider: OAuth認証
-    Provider-->>NextAuth: 認証トークン
-    NextAuth->>DB: ユーザー情報保存
-    NextAuth-->>Client: セッション作成
-    Client->>User: ダッシュボード表示
 ```
 
 ## コンポーネント設計
@@ -146,7 +113,9 @@ sequenceDiagram
 ```tsx
 // app/history/page.tsx
 export default async function HistoryPage() {
-  const images = await getGeneratedImages();
+  const images = await prisma.generatedImage.findMany({
+    orderBy: { createdAt: 'desc' }
+  });
   return <HistoryGrid images={images} />;
 }
 ```
@@ -173,12 +142,8 @@ export function PromptInput() {
 'use server';
 
 export async function generateImageAction(formData: FormData) {
-  const session = await getServerSession();
-  if (!session) throw new Error('Unauthorized');
-  
   const result = await prisma.task.create({
     data: {
-      userId: session.user.id,
       status: 'pending',
       data: JSON.stringify(Object.fromEntries(formData))
     }
@@ -199,69 +164,40 @@ export async function generateImageAction(formData: FormData) {
 
 ### 2. サーバー状態
 - Server Components
-- キャッシュ機能
+- データベースから直接取得
 
-### 3. グローバル状態
-- React Context（必要最小限）
-- URL状態（searchParams）
+### 3. URL状態
+- searchParams でフィルタリングやページネーション
 
 ## パフォーマンス最適化
 
 ### 1. 画像最適化
 ```tsx
+// Next.js Image コンポーネントでローカル画像を最適化
 import Image from 'next/image';
 
 <Image
-  src={imageUrl}
+  src="/images/generated-123.png"
   alt="Generated sticker"
   width={1024}
   height={1024}
   loading="lazy"
-  placeholder="blur"
 />
 ```
 
 ### 2. データキャッシュ
 ```typescript
-// Next.jsのキャッシュ機能
-import { unstable_cache } from 'next/cache';
+// メモリベースの簡易キャッシュ
+const imageCache = new Map<string, string>();
 
-const getCachedImages = unstable_cache(
-  async (userId: string) => {
-    return prisma.generatedImage.findMany({
-      where: { userId },
-      orderBy: { createdAt: 'desc' }
-    });
-  },
-  ['user-images'],
-  { revalidate: 60 } // 60秒キャッシュ
-);
-```
-
-### 3. Partial Prerendering
-```tsx
-// app/generate/page.tsx
-import { Suspense } from 'react';
-
-export default function GeneratePage() {
-  return (
-    <>
-      <StaticHeader />
-      <Suspense fallback={<LoadingSkeleton />}>
-        <DynamicContent />
-      </Suspense>
-    </>
-  );
+export function getCachedImage(promptHash: string): string | null {
+  return imageCache.get(promptHash) || null;
 }
 ```
 
 ## セキュリティ
 
-### 1. 認証・認可
-- NextAuth.jsによるセッション管理
-- API Routesでのセッションチェック
-
-### 2. 入力検証
+### 1. 入力検証
 ```typescript
 import { z } from 'zod';
 
@@ -273,18 +209,24 @@ const generateSchema = z.object({
 });
 ```
 
-### 3. レート制限
+### 2. レート制限
 ```typescript
-// middleware.ts
-import { Ratelimit } from '@upstash/ratelimit';
+// シンプルなメモリベースのレート制限
+const requestCounts = new Map<string, { count: number; resetTime: number }>();
 
-export async function middleware(request: NextRequest) {
-  const ip = request.ip ?? '127.0.0.1';
-  const { success } = await ratelimit.limit(ip);
+export function checkRateLimit(ip: string): boolean {
+  const now = Date.now();
+  const limit = requestCounts.get(ip);
   
-  if (!success) {
-    return new Response('Too Many Requests', { status: 429 });
+  if (!limit || now > limit.resetTime) {
+    requestCounts.set(ip, { count: 1, resetTime: now + 60000 });
+    return true;
   }
+  
+  if (limit.count >= 10) return false;
+  
+  limit.count++;
+  return true;
 }
 ```
 
@@ -305,6 +247,7 @@ export default function Error({
   return (
     <div>
       <h2>エラーが発生しました</h2>
+      <p>{error.message}</p>
       <button onClick={reset}>再試行</button>
     </div>
   );
@@ -318,81 +261,76 @@ export async function POST(request: NextRequest) {
   try {
     // 処理
   } catch (error) {
-    if (error instanceof ValidationError) {
-      return NextResponse.json(
-        { error: error.message },
-        { status: 400 }
-      );
-    }
-    
+    console.error('Generation error:', error);
     return NextResponse.json(
-      { error: 'Internal Server Error' },
+      { error: 'Failed to generate image' },
       { status: 500 }
     );
   }
 }
 ```
 
-## テスト戦略
+## ローカル開発環境
 
-### 1. 単体テスト
-- Jest + React Testing Library
-- コンポーネントテスト
-- ユーティリティ関数テスト
+### 1. セットアップ
+```bash
+# 依存関係のインストール
+npm install
 
-### 2. 統合テスト
-- Playwright
-- E2Eテスト
-- API統合テスト
+# データベースの初期化
+npx prisma generate
+npx prisma migrate dev
 
-### 3. パフォーマンステスト
-- Lighthouse CI
-- Core Web Vitals監視
+# 画像保存ディレクトリの作成
+mkdir -p public/images
 
-## デプロイメント
+# 開発サーバーの起動
+npm run dev
+```
 
-### 1. 環境変数
+### 2. 環境変数
 ```env
-# 本番環境
-OPENAI_API_KEY=
-NEXTAUTH_SECRET=
-NEXTAUTH_URL=
-DATABASE_URL=file:./prod.db
-VERCEL_BLOB_READ_WRITE_TOKEN=
+# .env.local
+OPENAI_API_KEY=sk-xxx
+DATABASE_URL=file:./dev.db
 ```
 
-### 2. ビルド・デプロイ
-```bash
-# ビルド
-npm run build
-
-# 型チェック
-npm run type-check
-
-# リント
-npm run lint
-
-# Vercelデプロイ
-vercel --prod
+### 3. 開発用コマンド
+```json
+// package.json
+{
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint",
+    "db:migrate": "prisma migrate dev",
+    "db:studio": "prisma studio",
+    "db:seed": "prisma db seed"
+  }
+}
 ```
 
-### 3. データベースマイグレーション
-```bash
-# 本番環境へのマイグレーション
-npx prisma migrate deploy
+## デバッグとトラブルシューティング
+
+### 1. デバッグツール
+- Next.js DevTools
+- Prisma Studio でデータベース確認
+- ブラウザの開発者ツール
+
+### 2. ログ出力
+```typescript
+// 開発環境でのログ出力
+if (process.env.NODE_ENV === 'development') {
+  console.log('Debug info:', {
+    taskId,
+    status,
+    timestamp: new Date().toISOString()
+  });
+}
 ```
 
-## モニタリング
-
-### 1. パフォーマンス監視
-- Vercel Analytics
-- Sentry Performance
-
-### 2. エラー監視
-- Sentry Error Tracking
-- カスタムエラーログ
-
-### 3. 使用量監視
-- API使用量
-- ストレージ使用量
-- データベースクエリ数
+### 3. よくある問題と解決方法
+- **画像が表示されない**: public/imagesディレクトリの権限確認
+- **データベースエラー**: `npx prisma migrate reset` でリセット
+- **APIレート制限**: 開発環境では制限を緩和

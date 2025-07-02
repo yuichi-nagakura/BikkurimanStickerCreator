@@ -170,7 +170,9 @@ interface UploadResponse {
 #### 実装例（app/api/upload/route.ts）
 ```typescript
 import { NextRequest, NextResponse } from 'next/server';
-import { put } from '@vercel/blob';
+import { writeFile } from 'fs/promises';
+import { join } from 'path';
+import { v4 as uuidv4 } from 'uuid';
 
 export async function POST(request: NextRequest) {
   try {
@@ -184,13 +186,17 @@ export async function POST(request: NextRequest) {
       );
     }
     
-    const blob = await put(file.name, file, {
-      access: 'public',
-    });
+    const bytes = await file.arrayBuffer();
+    const buffer = Buffer.from(bytes);
+    
+    const filename = `${uuidv4()}-${file.name}`;
+    const filepath = join(process.cwd(), 'public', 'images', filename);
+    
+    await writeFile(filepath, buffer);
     
     return NextResponse.json({
-      imageUrl: blob.url,
-      uploadId: blob.pathname
+      imageUrl: `/images/${filename}`,
+      uploadId: filename
     });
   } catch (error) {
     return NextResponse.json(
@@ -209,7 +215,6 @@ GET /api/history
 ```
 
 #### クエリパラメータ
-- `userId`: ユーザーID（必須）
 - `limit`: 取得件数（デフォルト: 20）
 - `offset`: オフセット（デフォルト: 0）
 
@@ -238,27 +243,16 @@ import { prisma } from '@/lib/db';
 export async function GET(request: NextRequest) {
   try {
     const searchParams = request.nextUrl.searchParams;
-    const userId = searchParams.get('userId');
     const limit = parseInt(searchParams.get('limit') || '20');
     const offset = parseInt(searchParams.get('offset') || '0');
     
-    if (!userId) {
-      return NextResponse.json(
-        { error: 'userId is required' },
-        { status: 400 }
-      );
-    }
-    
     const [history, total] = await Promise.all([
       prisma.generatedImage.findMany({
-        where: { userId },
         orderBy: { createdAt: 'desc' },
         take: limit,
         skip: offset
       }),
-      prisma.generatedImage.count({
-        where: { userId }
-      })
+      prisma.generatedImage.count()
     ]);
     
     return NextResponse.json({
@@ -319,56 +313,39 @@ interface ErrorResponse {
 ### HTTPステータスコード
 - `200`: 成功
 - `400`: 不正なリクエスト
-- `401`: 認証エラー
 - `404`: リソースが見つからない
 - `429`: レート制限超過
 - `500`: サーバーエラー
 
-## 認証
-NextAuth.jsを使用した認証が必要なエンドポイントには、セッションチェックを実装します。
-
-```typescript
-import { getServerSession } from 'next-auth';
-import { authOptions } from '@/lib/auth';
-
-export async function POST(request: NextRequest) {
-  const session = await getServerSession(authOptions);
-  
-  if (!session) {
-    return NextResponse.json(
-      { error: 'Unauthorized' },
-      { status: 401 }
-    );
-  }
-  
-  // 処理を続行
-}
-```
 
 ## レート制限
-Vercelのミドルウェアを使用してレート制限を実装します。
+ローカル開発環境ではシンプルなメモリベースのレート制限を実装します。
 
 ```typescript
 // middleware.ts
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
-import { Ratelimit } from '@upstash/ratelimit';
-import { Redis } from '@upstash/redis';
 
-const ratelimit = new Ratelimit({
-  redis: Redis.fromEnv(),
-  limiter: Ratelimit.slidingWindow(10, '1 m'),
-});
+// メモリベースのレート制限
+ const requestCounts = new Map<string, { count: number; resetTime: number }>();
 
 export async function middleware(request: NextRequest) {
   const ip = request.ip ?? '127.0.0.1';
-  const { success } = await ratelimit.limit(ip);
+  const now = Date.now();
+  const windowMs = 60 * 1000; // 1分
+  const maxRequests = 10;
   
-  if (!success) {
+  const requestData = requestCounts.get(ip);
+  
+  if (!requestData || now > requestData.resetTime) {
+    requestCounts.set(ip, { count: 1, resetTime: now + windowMs });
+  } else if (requestData.count >= maxRequests) {
     return NextResponse.json(
       { error: 'Too many requests' },
       { status: 429 }
     );
+  } else {
+    requestData.count++;
   }
   
   return NextResponse.next();

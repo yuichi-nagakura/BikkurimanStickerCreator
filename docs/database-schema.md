@@ -19,55 +19,10 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// ユーザーテーブル
-model User {
-  id            String    @id @default(cuid())
-  email         String    @unique
-  name          String?
-  image         String?
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
-  
-  // リレーション
-  accounts      Account[]
-  sessions      Session[]
-  generatedImages GeneratedImage[]
-  tasks         Task[]
-}
-
-// NextAuth.js用アカウントテーブル
-model Account {
-  id                String  @id @default(cuid())
-  userId            String
-  type              String
-  provider          String
-  providerAccountId String
-  refresh_token     String?
-  access_token      String?
-  expires_at        Int?
-  token_type        String?
-  scope             String?
-  id_token          String?
-  session_state     String?
-  
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
-  
-  @@unique([provider, providerAccountId])
-}
-
-// NextAuth.js用セッションテーブル
-model Session {
-  id           String   @id @default(cuid())
-  sessionToken String   @unique
-  userId       String
-  expires      DateTime
-  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-}
 
 // 生成画像テーブル
 model GeneratedImage {
   id              String   @id @default(cuid())
-  userId          String
   imageUrl        String
   prompt          String
   sourceImageUrl  String?
@@ -80,15 +35,12 @@ model GeneratedImage {
   style           String   // JSON string
   createdAt       DateTime @default(now())
   
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
-  
-  @@index([userId, createdAt])
+  @@index([createdAt])
 }
 
 // タスクテーブル（非同期処理用）
 model Task {
   id        String   @id @default(cuid())
-  userId    String
   status    String   // pending, processing, completed, failed
   progress  Int      @default(0)
   data      String   // JSON string (リクエストデータ)
@@ -97,9 +49,7 @@ model Task {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
-  
-  @@index([userId, status])
+  @@index([status])
   @@index([createdAt])
 }
 
@@ -118,40 +68,25 @@ model ImageCache {
 // 利用統計テーブル
 model UsageStats {
   id              String   @id @default(cuid())
-  userId          String
   date            DateTime
   imageCount      Int      @default(0)
   totalTokens     Int      @default(0)
   successCount    Int      @default(0)
   failureCount    Int      @default(0)
   
-  @@unique([userId, date])
-  @@index([userId])
+  @@unique([date])
   @@index([date])
 }
 ```
 
 ## テーブル詳細
 
-### 1. User（ユーザー）
-NextAuth.jsと連携したユーザー管理テーブル。
-
-| カラム名 | 型 | 説明 |
-|---------|-----|------|
-| id | String | ユーザーID（CUID） |
-| email | String | メールアドレス（ユニーク） |
-| name | String? | ユーザー名 |
-| image | String? | プロフィール画像URL |
-| createdAt | DateTime | 作成日時 |
-| updatedAt | DateTime | 更新日時 |
-
-### 2. GeneratedImage（生成画像）
+### 1. GeneratedImage（生成画像）
 生成された画像の情報を保存するテーブル。
 
 | カラム名 | 型 | 説明 |
 |---------|-----|------|
 | id | String | 画像ID（CUID） |
-| userId | String | ユーザーID（外部キー） |
 | imageUrl | String | 生成画像のURL |
 | prompt | String | 生成プロンプト |
 | sourceImageUrl | String? | 元画像URL |
@@ -164,13 +99,12 @@ NextAuth.jsと連携したユーザー管理テーブル。
 | style | String | スタイル設定（JSON） |
 | createdAt | DateTime | 作成日時 |
 
-### 3. Task（タスク）
+### 2. Task（タスク）
 非同期処理のタスク管理テーブル。
 
 | カラム名 | 型 | 説明 |
 |---------|-----|------|
 | id | String | タスクID（CUID） |
-| userId | String | ユーザーID（外部キー） |
 | status | String | ステータス |
 | progress | Int | 進捗（0-100） |
 | data | String | リクエストデータ（JSON） |
@@ -179,7 +113,7 @@ NextAuth.jsと連携したユーザー管理テーブル。
 | createdAt | DateTime | 作成日時 |
 | updatedAt | DateTime | 更新日時 |
 
-### 4. ImageCache（画像キャッシュ）
+### 3. ImageCache（画像キャッシュ）
 画像生成結果のキャッシュテーブル。
 
 | カラム名 | 型 | 説明 |
@@ -191,13 +125,12 @@ NextAuth.jsと連携したユーザー管理テーブル。
 | expiresAt | DateTime | 有効期限 |
 | createdAt | DateTime | 作成日時 |
 
-### 5. UsageStats（利用統計）
-ユーザーごとの日別利用統計。
+### 4. UsageStats（利用統計）
+日別利用統計。
 
 | カラム名 | 型 | 説明 |
 |---------|-----|------|
 | id | String | 統計ID（CUID） |
-| userId | String | ユーザーID |
 | date | DateTime | 日付 |
 | imageCount | Int | 生成画像数 |
 | totalTokens | Int | 使用トークン数 |
@@ -231,27 +164,23 @@ DATABASE_URL="file:./prod.db"
 
 ### パフォーマンス最適化のためのインデックス
 1. **GeneratedImage**
-   - `(userId, createdAt)`: ユーザーごとの履歴取得を高速化
+   - `(createdAt)`: 履歴取得を高速化
 
 2. **Task**
-   - `(userId, status)`: ユーザーごとのタスク状態確認を高速化
+   - `(status)`: タスク状態確認を高速化
    - `(createdAt)`: 古いタスクのクリーンアップ用
 
 3. **ImageCache**
    - `(expiresAt)`: 期限切れキャッシュのクリーンアップ用
 
 4. **UsageStats**
-   - `(userId)`: ユーザーごとの統計取得
    - `(date)`: 日付範囲での集計
 
 ## データ操作例
 
-### ユーザーの画像生成履歴取得
+### 画像生成履歴取得
 ```typescript
 const history = await prisma.generatedImage.findMany({
-  where: {
-    userId: userId
-  },
   orderBy: {
     createdAt: 'desc'
   },
@@ -280,10 +209,7 @@ today.setHours(0, 0, 0, 0);
 
 await prisma.usageStats.upsert({
   where: {
-    userId_date: {
-      userId: userId,
-      date: today
-    }
+    date: today
   },
   update: {
     imageCount: {
@@ -294,7 +220,6 @@ await prisma.usageStats.upsert({
     }
   },
   create: {
-    userId: userId,
     date: today,
     imageCount: 1,
     successCount: 1
