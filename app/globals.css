@@ -1,0 +1,51 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;700;900&display=swap');
+
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 0 0% 3.9%;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --background: 0 0% 3.9%;
+      --foreground: 0 0% 98%;
+    }
+  }
+}
+
+@layer components {
+  .title-gothic {
+    font-family: var(--font-noto-sans-jp), 'Noto Sans JP', sans-serif;
+    font-weight: 900;
+    text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.5);
+  }
+
+  .gradient-text {
+    background: linear-gradient(45deg, #ff0000, #ff7700, #ffdd00, #00ff00, #0099ff, #6633ff);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    background-size: 400% 400%;
+    animation: holographic 3s ease-in-out infinite;
+  }
+
+  .holographic-bg {
+    background: linear-gradient(45deg, #ff0000, #ff7700, #ffdd00, #00ff00, #0099ff, #6633ff);
+    background-size: 400% 400%;
+    animation: holographic 3s ease-in-out infinite;
+  }
+}
+
+@keyframes holographic {
+  0%, 100% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+}
